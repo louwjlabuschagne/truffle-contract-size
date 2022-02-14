@@ -21,19 +21,21 @@ module.exports = async (config, done) => {
   yargs.parse(process.argv.slice(3))
 
   const contractNames = yargs.argv.contracts
-  const { checkMaxSize, ignoreMocks } = yargs.argv
+  const { checkMaxSize, ignoreMocks, showTotal } = yargs.argv
 
   if (!isValidCheckMaxSize(checkMaxSize)) {
     done(`--checkMaxSize: invalid value ${checkMaxSize}`)
   }
 
   const table = new Table({
-    head: ['Contract'.white.bold, 'Size'.white.bold],
-    colWidths: [70, 10]
+    head: ['Contract'.white.bold, 'Size (kB)'.white.bold, 'Size (B)'.white.bold],
+    colWidths: [30, 20, 50]
   })
 
   // array of objects of {file: path to file, name: name of the contract}
   const contracts = await getContracts(config, contractNames, ignoreMocks, done)
+
+  let total = 0
 
   const contractPromises = contracts.map(async (contract) => {
     await checkFile(contract.file, done)
@@ -43,16 +45,33 @@ module.exports = async (config, done) => {
     if (!('deployedBytecode' in contractFile)) {
       done(`Error: deployedBytecode not found in ${contract.file} (it is not a contract json file)`)
     }
+    total += computeByteCodeSizeInB(contractFile.deployedBytecode)
 
     const byteCodeSize = computeByteCodeSizeInKiB(contractFile.deployedBytecode)
+    const byteCodeSizeInB = computeByteCodeSizeInB(contractFile.deployedBytecode)
 
     table.push([
       contract.name,
-      formatByteCodeSize(byteCodeSize)
+      `${byteCodeSize} KiB`,
+      `${byteCodeSizeInB} Bytes`
     ])
   })
 
   await Promise.all(contractPromises)
+
+  if (showTotal) {
+    table.push([
+      '-',
+      '-',
+      '-'
+    ])
+
+    table.push([
+      'Total',
+      `${total/1024} KiB`,
+      `${total} Bytes`
+    ])
+  }
 
   console.log(table.toString())
 
@@ -94,6 +113,13 @@ function computeByteCodeSizeInKiB (byteCode) {
   // /2 because one byte consists of two hexadecimal values
   // /1024 to convert to size from byte to kibibytes
   return (byteCode.length - 2) / 2 / 1024
+}
+
+function computeByteCodeSizeInB (byteCode) {
+  // -2 to remove 0x from the beginning of the string
+  // /2 because one byte consists of two hexadecimal values
+  // /1024 to convert to size from byte to kibibytes
+  return (byteCode.length - 2) / 2
 }
 
 function formatByteCodeSize (byteCodeSize) {
